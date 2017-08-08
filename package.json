@@ -1,6 +1,6 @@
 {
     "name": "quote-morphing",
-    "displayName": "quote-morphing",
+    "displayName": "Quote Morphing",
     "description": "Fixes VS Code quote replacement",
     "version": "0.0.1",
     "publisher": "overengineered",
@@ -11,15 +11,9 @@
         "Other"
     ],
     "activationEvents": [
-        "onCommand:extension.sayHello"
+        "*"
     ],
     "main": "./out/src/extension",
-    "contributes": {
-        "commands": [{
-            "command": "extension.sayHello",
-            "title": "Hello World"
-        }]
-    },
     "scripts": {
         "vscode:prepublish": "tsc -p ./",
         "compile": "tsc -watch -p ./",
