@@ -12,9 +12,9 @@ export function deactivate() {
 
 const QUOTES = ['\'', '"', '`'];
 const LOGGING_ENABLED = false;
-const log = (...args) => { if (LOGGING_ENABLED) console.log(args); }
+const log = (...args) => { if (LOGGING_ENABLED) console.log(...args); }
 
-function findQuotesToMorph(event: vscode.TextDocumentChangeEvent) {
+async function findQuotesToMorph(event: vscode.TextDocumentChangeEvent) {
     let wrapping = findWrappingSingleCharacterInQuotes(event);
     if (!wrapping) {
         return;
@@ -25,19 +25,38 @@ function findQuotesToMorph(event: vscode.TextDocumentChangeEvent) {
         return;
     }
 
-    const wrappedStart = wrapping.start.translate(0, wrapping.insertedQuote.length);
-    const wrapped = editor.document.getText(new vscode.Range(wrappedStart, wrapping.end));
+    const wrappedStart = wrapping.opening.translate(0, wrapping.insertedQuote.length);
+    const wrapped = editor.document.getText(new vscode.Range(wrappedStart, wrapping.closing));
 
     if (QUOTES.indexOf(wrapped) == -1) {
         log(`abort - wrapped '${wrapped}' is not a quote`);
         return;
     }
 
-    editor.edit((editBuilder) => {
-        const wrappingRange = new vscode.Range(wrapping.start,
-            wrapping.end.translate(0, wrapping.insertedQuote.length));
+    const line = wrapping.opening.line;
+    const wrappingEnd = wrapping.closing.translate(0, wrapping.insertedQuote.length);
+    const originalLine =
+        editor.document.getText(new vscode.Range(line, 0, line, wrapping.opening.character)) +
+        wrapped +
+        readLine(editor.document, wrappingEnd);
+
+    const pairedQuote = findPairedWrappingQuote(originalLine, wrapping.opening.character);
+    const pairedIsClosing = pairedQuote > wrapping.opening.character;
+
+    const operation = editor.edit((editBuilder) => {
+        const wrappingRange = new vscode.Range(wrapping.opening, wrappingEnd);
         editBuilder.replace(wrappingRange, wrapping.insertedQuote);
+        if (pairedQuote) {
+            const offset = pairedIsClosing ? wrapping.insertedQuote.length * 2 : 0;
+            const range = new vscode.Range(line, pairedQuote + offset, line, pairedQuote + offset + 1);
+            editBuilder.replace(range, wrapping.insertedQuote);
+        }
     });
+
+    if (pairedQuote) {
+        await operation;
+        editor.selection = new vscode.Selection(wrapping.opening, wrappedStart);
+    }
 }
 
 function findWrappingSingleCharacterInQuotes(event: vscode.TextDocumentChangeEvent) {
@@ -93,10 +112,47 @@ function detectInsertionOf2QuotesAroundSingleCharacter(event: vscode.TextDocumen
 
     const result = {
         insertedQuote: first.text,
-        start,
-        end
+        opening: start,
+        closing: end
     };
 
     log(`single character wrapped in quotes ${JSON.stringify(result)}`);
     return result;
+}
+
+function readLine(doc: vscode.TextDocument, start: vscode.Position): string {
+    const charactersToRead = 1;
+    let charactersReceived;
+    let result = "";
+    do {
+        const end = new vscode.Position(start.line, start.character + charactersToRead);
+        const chunk = doc.getText(new vscode.Range(start, end));
+        charactersReceived = chunk.length;
+        result = result + chunk;
+        start = end;
+    } while (charactersReceived == charactersToRead);
+    return result;
+}
+
+function findPairedWrappingQuote(text: string, position: number): number {
+    let wrappingQuote = null;
+    let wrappingStart = null;
+    for (let index = 0; index < text.length; index++) {
+        if (wrappingQuote) {
+            const foundClosingQuote = wrappingQuote == text[index];
+            if (index == position) {
+                return foundClosingQuote ? wrappingStart : undefined;
+            } else if (foundClosingQuote) {
+                if (wrappingStart == position) {
+                    return index;
+                }
+                wrappingQuote = null;
+                wrappingStart = null;
+            }
+        } else if (QUOTES.indexOf(text[index]) != -1) {
+            wrappingQuote = text[index];
+            wrappingStart = index;
+        }
+    }
+    return undefined;
 }
